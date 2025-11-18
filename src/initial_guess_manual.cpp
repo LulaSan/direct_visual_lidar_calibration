@@ -73,7 +73,7 @@ public:
 
 class InitialGuessManual {
 public:
-  InitialGuessManual(const std::string& data_path) : data_path(data_path), camera_image_rotate_code(-1) {
+  InitialGuessManual(const std::string& data_path) : data_path(data_path), point_size(1.0f),camera_image_rotate_code(-1) {
     std::ifstream ifs(data_path + "/calib.json");
     if (!ifs) {
       std::cerr << vlcal::console::bold_red << "error: failed to open " << data_path << "/calib.json" << vlcal::console::reset << std::endl;
@@ -101,7 +101,7 @@ public:
     std::cout << "image_size:" << image_size.width << "x" << image_size.height << std::endl;
     std::cout << "camera_fov:" << estimate_camera_fov(proj, {image_size.width, image_size.height}) * 180.0 / M_PI << "[deg]" << std::endl;
 
-    vis.reset(new VisualLiDARVisualizer(proj, dataset, true, true));
+    vis.reset(new VisualLiDARVisualizer(proj, dataset, true, false));
     vis->set_blend_weight(0.1f);
 
     picking.reset(new PickingPoseEstimation(proj));
@@ -125,15 +125,55 @@ public:
 
   void spin() {
     const std::string camera_model = config["camera"]["camera_model"];
+    // original
+    //  Eigen::Isometry3d init_T_lidar_camera = Eigen::Isometry3d::Identity();
+    //  if (camera_model != "equirectangular") {
+    //    init_T_lidar_camera.linear() = (Eigen::AngleAxisd(M_PI_2, Eigen::Vector3d::UnitY()) * Eigen::AngleAxisd(-M_PI_2, Eigen::Vector3d::UnitZ())).toRotationMatrix();
+    //  } else {
+    //    init_T_lidar_camera.linear() = (Eigen::AngleAxisd(-M_PI_2, Eigen::Vector3d::UnitX())).toRotationMatrix();
+    //  }
+    // original
     Eigen::Isometry3d init_T_lidar_camera = Eigen::Isometry3d::Identity();
-    if (camera_model != "equirectangular") {
-      init_T_lidar_camera.linear() = (Eigen::AngleAxisd(M_PI_2, Eigen::Vector3d::UnitY()) * Eigen::AngleAxisd(-M_PI_2, Eigen::Vector3d::UnitZ())).toRotationMatrix();
+
+    // Check if measured_init_T_lidar_camera exists in the config
+    if (config.count("results") && config["results"].count("measured_init_T_lidar_camera")) {
+      std::cout << "Loading initial guess from measured_init_T_lidar_camera" << std::endl;
+      const std::vector<double> values = config["results"]["measured_init_T_lidar_camera"];
+
+      if (values.size() == 7) {
+        // Values are [tx, ty, tz, qx, qy, qz, qw]
+        const Eigen::Vector3d trans(values[0], values[1], values[2]);
+        const Eigen::Quaterniond quat(values[6], values[3], values[4], values[5]);  // w, x, y, z order
+
+        init_T_lidar_camera.translation() = trans;
+        init_T_lidar_camera.linear() = quat.toRotationMatrix();
+
+        std::cout << "Loaded measured initial guess:" << std::endl;
+        std::cout << init_T_lidar_camera.matrix() << std::endl;
+      } else {
+        std::cerr << "Warning: measured_init_T_lidar_camera has " << values.size() << " elements, expected 7. Using default initial guess." << std::endl;
+        // Fall back to default initialization below
+        if (camera_model != "equirectangular") {
+          init_T_lidar_camera.linear() = (Eigen::AngleAxisd(M_PI_2, Eigen::Vector3d::UnitY()) * Eigen::AngleAxisd(-M_PI_2, Eigen::Vector3d::UnitZ())).toRotationMatrix();
+        } else {
+          init_T_lidar_camera.linear() = (Eigen::AngleAxisd(-M_PI_2, Eigen::Vector3d::UnitX())).toRotationMatrix();
+        }
+      }
     } else {
-      init_T_lidar_camera.linear() = (Eigen::AngleAxisd(-M_PI_2, Eigen::Vector3d::UnitX())).toRotationMatrix();
+      std::cout << "No measured_init_T_lidar_camera found, using default initial guess" << std::endl;
+      // Default initialization based on camera model
+      if (camera_model != "equirectangular") {
+        init_T_lidar_camera.linear() = (Eigen::AngleAxisd(M_PI_2, Eigen::Vector3d::UnitY()) * Eigen::AngleAxisd(-M_PI_2, Eigen::Vector3d::UnitZ())).toRotationMatrix();
+      } else {
+        init_T_lidar_camera.linear() = (Eigen::AngleAxisd(-M_PI_2, Eigen::Vector3d::UnitX())).toRotationMatrix();
+      }
+      std::cout << "Default initial guess:" << std::endl;
+      std::cout << init_T_lidar_camera.matrix() << std::endl;
     }
 
     auto viewer = guik::LightViewer::instance();
     guik::ModelControl T_lidar_camera_gizmo("T_lidar_camera", init_T_lidar_camera.matrix().cast<float>());
+
     viewer->register_ui_callback("gizmo", [&] {
       auto& io = ImGui::GetIO();
       if (!io.WantCaptureMouse && io.MouseClicked[1]) {
@@ -215,7 +255,16 @@ public:
 
         viewer->append_text(sst.str());
       }
+      // LS
+      ImGui::Separator();
 
+      if (ImGui::Begin("Point Cloud Controls")) {
+        // Point size slider
+        if (ImGui::SliderFloat("Point Scale", &point_size, 0.1f, 10.0f, "%.1f")) {
+          update_point_size();
+        }
+        // LS
+      }
       ImGui::End();
     });
 
@@ -223,19 +272,28 @@ public:
       cv::waitKey(1);
     }
   }
+  void update_point_size() {
+    if (vis) {
+      vis->set_point_scale(point_size);  // add this method if not already in VisualLiDARVisualizer
+    }
+  }
 
   void update_image() {
     const double scale = vis->get_image_display_scale();
+    cv::Mat resized;
 
-    cv::Mat resized, canvas;
     cv::resize(dataset[vis->get_selected_bag_id()]->image, resized, cv::Size(), scale, scale);
-    cv::cvtColor(resized, canvas, cv::COLOR_GRAY2BGR);
-
+    // original code start
+    // cv::Mat resized, canvas;
+    // cv::cvtColor(resized, canvas, cv::COLOR_GRAY2BGR);
+    // original code end
+    // Ls modification
+    // end modification
     if (camera_image_rotate_code >= 0) {
-      cv::rotate(canvas.clone(), canvas, camera_image_rotate_code);
+      cv::rotate(resized.clone(), resized, camera_image_rotate_code);
     }
 
-    cv::imshow("image", canvas);
+    cv::imshow("image", resized);
   }
 
   Eigen::Vector2d transform_camera_point(const Eigen::Vector2d& pt) {
@@ -264,20 +322,22 @@ public:
 
     const double scale = vis->get_image_display_scale();
 
-    cv::Mat resized, canvas;
+    // cv::Mat resized, canvas;
+    cv::Mat resized;
+
     cv::resize(dataset[vis->get_selected_bag_id()]->image, resized, cv::Size(), scale, scale);
-    cv::cvtColor(resized, canvas, cv::COLOR_GRAY2BGR);
+    // cv::cvtColor(resized, canvas, cv::COLOR_GRAY2BGR);
 
     if (camera_image_rotate_code >= 0) {
-      cv::rotate(canvas.clone(), canvas, camera_image_rotate_code);
+      cv::rotate(resized.clone(), resized, camera_image_rotate_code);
     }
 
     const int cross_size = 15;
-    cv::line(canvas, {x - cross_size, y - cross_size}, {x + cross_size, y + cross_size}, cv::Scalar(64, 64, 64), 4, cv::LINE_AA);
-    cv::line(canvas, {x + cross_size, y - cross_size}, {x - cross_size, y + cross_size}, cv::Scalar(64, 64, 64), 4, cv::LINE_AA);
-    cv::line(canvas, {x - cross_size, y - cross_size}, {x + cross_size, y + cross_size}, cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
-    cv::line(canvas, {x + cross_size, y - cross_size}, {x - cross_size, y + cross_size}, cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
-    cv::imshow("image", canvas);
+    cv::line(resized, {x - cross_size, y - cross_size}, {x + cross_size, y + cross_size}, cv::Scalar(64, 64, 64), 4, cv::LINE_AA);
+    cv::line(resized, {x + cross_size, y - cross_size}, {x - cross_size, y + cross_size}, cv::Scalar(64, 64, 64), 4, cv::LINE_AA);
+    cv::line(resized, {x - cross_size, y - cross_size}, {x + cross_size, y + cross_size}, cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
+    cv::line(resized, {x + cross_size, y - cross_size}, {x - cross_size, y + cross_size}, cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
+    cv::imshow("image", resized);
 
     const Eigen::Vector2d pt = transform_camera_point({x / scale, y / scale});
     picking->pick_point_2d(pt);
@@ -292,6 +352,7 @@ private:
   const std::string data_path;
   nlohmann::json config;
 
+  float point_size;
   int camera_image_rotate_code;
 
   camera::GenericCameraBase::ConstPtr proj;
@@ -299,9 +360,9 @@ private:
 
   std::unique_ptr<VisualLiDARVisualizer> vis;
   std::unique_ptr<PickingPoseEstimation> picking;
-};
 
-}  // namespace vlcal
+};
+} // namespace vlcal
 
 int main(int argc, char** argv) {
   using namespace boost::program_options;
