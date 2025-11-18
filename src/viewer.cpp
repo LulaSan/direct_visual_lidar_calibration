@@ -92,7 +92,7 @@ public:
       dataset.emplace_back(std::make_shared<VisualLiDARData>(data_path, bag_name));
     }
 
-    vis.reset(new VisualLiDARVisualizer(proj, dataset, false));
+    vis.reset(new VisualLiDARVisualizer(proj, dataset, true));
     vis->set_T_camera_lidar(T_lidar_camera[selected_transformation].inverse());
 
     viewer->register_ui_callback("callback", [this] { ui_callback(); });

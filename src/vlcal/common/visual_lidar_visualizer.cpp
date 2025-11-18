@@ -25,6 +25,7 @@ VisualLiDARVisualizer::VisualLiDARVisualizer(
 
   selected_bag_id = -1;
   blend_weight = 0.7f;
+  point_scale_ = 1.0f;
   viewer->register_ui_callback("ui", [this] { ui_callback(); });
 
   kill_switch = false;
@@ -55,7 +56,9 @@ void VisualLiDARVisualizer::ui_callback() {
   if (prev_selected_bag_id != selected_bag_id) {
     std::lock_guard<std::mutex> lock(updater_mutex);
     color_updater.reset(new PointsColorUpdater(proj, dataset[selected_bag_id]->image, dataset[selected_bag_id]->points));
-    viewer->update_drawable("points", color_updater->cloud_buffer, guik::VertexColor());
+    // viewer->update_drawable("points", color_updater->cloud_buffer, guik::VertexColor());
+    viewer->update_drawable("points", color_updater->cloud_buffer,  guik::VertexColor().set_point_scale(point_scale_));
+
 
     if (draw_sphere) {
       sphere_updater.reset(new PointsColorUpdater(proj, dataset[selected_bag_id]->image));
@@ -68,12 +71,16 @@ void VisualLiDARVisualizer::ui_callback() {
       cv::imshow("image", canvas);
     } else {
       cv::Mat bgr;
-      cv::cvtColor(dataset[selected_bag_id]->image, bgr, cv::COLOR_GRAY2BGR);
+      // cv::cvtColor(dataset[selected_bag_id]->image, bgr, cv::COLOR_GRAY2BGR);
+      bgr = dataset[selected_bag_id]->image.clone();
       viewer->update_image("image", glk::create_texture(bgr));
     }
   }
   ImGui::DragFloat("blend_weight", &blend_weight, 0.01f, 0.0f, 1.0f);
-
+  ImGui::DragFloat("Point Scale", &point_scale_, 0.1f, 0.1f, 10.0f);
+if (ImGui::IsItemDeactivatedAfterEdit()) {
+  set_point_scale(point_scale_);
+}
   ImGui::End();
 }
 
@@ -99,4 +106,12 @@ void VisualLiDARVisualizer::color_update_task() {
   }
 }
 
+void VisualLiDARVisualizer::set_point_scale(float scale) {
+  point_scale_ = scale;
+  auto viewer = guik::LightViewer::instance();
+
+  if (color_updater) {
+    viewer->update_drawable("points", color_updater->cloud_buffer, guik::VertexColor().set_point_scale(point_scale_));
+  }
+}
 }  // namespace vlcal
