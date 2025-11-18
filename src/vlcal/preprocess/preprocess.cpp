@@ -59,6 +59,8 @@ bool Preprocess::run(int argc, char** argv) {
     ("min_distance", value<double>()->default_value(1.0), "minimum point distance. Points closer than this value will be discarded")
     ("verbose", "if true, print out optimization status")
     ("visualize,v", "if true, show extracted images and points")
+    ("single-frame", "skip point cloud aggregation and use only first frame")
+
   ;
   // clang-format on
 
@@ -411,15 +413,79 @@ std::pair<cv::Mat, Frame::ConstPtr> Preprocess::get_image_and_points(
   const std::string& intensity_channel,
   const int num_threads) {
   //
-  cv::Mat image = get_image(bag_filename, image_topic);
-  if (!image.data) {
+  cv::Mat raw_image = get_image(bag_filename, image_topic);
+  if (!raw_image.data) {
     std::cerr << vlcal::console::bold_red << "error: failed to obtain an image (image_topic=" << image_topic << ")" << vlcal::console::reset << std::endl;
     abort();
   }
-  cv::equalizeHist(image.clone(), image);
+  // original code start
+  // cv::equalizeHist(raw_image.clone(), raw_image);
+  //original code end
+  cv::Mat image;
+
+  //LS start modification
+  if (raw_image.channels() == 3) {
+    // Keep RGB image as is
+    image = raw_image.clone();
+  } else {
+    std::cerr << "Unsupported image format with " << raw_image.channels() << " channels" << std::endl;
+    return std::make_pair(cv::Mat(), nullptr);
+  }
+    // Apply histogram equalization per channel for RGB
+
+   if (image.channels() == 3) {
+    std::vector<cv::Mat> channels;
+    cv::split(image, channels);
+    for (auto& channel : channels) {
+      cv::equalizeHist(channel, channel);
+    }
+    cv::merge(channels, image);
+  } else {
+    cv::equalizeHist(image, image);
+  }
+  //LS END
+
+  auto points_reader = get_point_cloud_reader(bag_filename, points_topic, intensity_channel);
+
+  //LS START
 
   // integrate points
   TimeKeeper time_keeper;
+  bool single_frame_mode = vm.count("single-frame");
+  
+  if (single_frame_mode) {
+    std::cout << vlcal::console::bold_yellow << "[single-frame] use only the first valid point cloud" << vlcal::console::reset << std::endl;
+
+    while (true) {
+      auto raw_points = points_reader->read_next();
+      if (!raw_points) {
+        std::cerr << vlcal::console::bold_red << "error: no valid point cloud found in bag for single-frame mode" << vlcal::console::reset << std::endl;
+        abort();
+      }
+      if (!time_keeper.process(raw_points)) {
+        continue; // skip invalid timestamp frames
+      }
+
+      auto points = std::make_shared<FrameCPU>(raw_points->points);
+      points->add_times(raw_points->times);
+      points->add_intensities(raw_points->intensities);
+      points = filter(points, [](const Eigen::Vector4d& p) { return p.array().isFinite().all(); });
+
+      // Intensity histogram equalization (same logic as multi-frame path)
+      std::vector<int> indices(points->size());
+      std::iota(indices.begin(), indices.end(), 0);
+      std::sort(indices.begin(), indices.end(), [&](int lhs, int rhs) { return points->intensities[lhs] < points->intensities[rhs]; });
+      const int bins = 256;
+      for (int i = 0; i < static_cast<int>(indices.size()); i++) {
+        const double value = std::floor(bins * static_cast<double>(i) / indices.size()) / bins;
+        points->intensities[indices[i]] = value;
+      }
+
+      return {image, points};
+    }
+  }
+
+  // no single frame
   std::unique_ptr<vlcal::PointCloudIntegrator> points_integrator;
 
   if (vm.count("dynamic_lidar_integration")) {
@@ -439,7 +505,7 @@ std::pair<cv::Mat, Frame::ConstPtr> Preprocess::get_image_and_points(
     points_integrator.reset(new vlcal::StaticPointCloudIntegrator(params));
   }
 
-  auto points_reader = get_point_cloud_reader(bag_filename, points_topic, intensity_channel);
+  
   while (true) {
     auto raw_points = points_reader->read_next();
     if (!raw_points) {
