@@ -1,5 +1,15 @@
 # direct_visual_lidar_calibration
+## What's new
+1. In the preprocessing step you can add the flag --single-frame to avoid point cloud aggregation
+2. In the initial_guess_manual you can now
+ - see colored images and colored point clouds (from image projections)
+ - increase the point size
+ - start the picking with the sensors already aligned according to a possible measured initial guess:
+   write in the calib.json under "results", "measured_init_T_lidar_camera" 
+3. During the calibrate phase I recommend using these paramters "--registration-type nid_nelder_mead"
+4. In the viewer you can evaluate the selected extrinsics by picking a 3D point and hitting "Reproject Point", then you can see in the image how far it fell away from the supposed point.
 
+## What was already there
 This package provides a toolbox for LiDAR-camera calibration that is: 
 
 - **Generalizable**: It can handle various LiDAR and camera projection models including spinning and non-repetitive scan LiDARs, and pinhole, fisheye, and omnidirectional projection cameras.
