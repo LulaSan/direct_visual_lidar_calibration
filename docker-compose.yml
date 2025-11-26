@@ -2,7 +2,40 @@ services:
   direct_calibration:
     container_name: direct-calibration
     build:
-      dockerfile: Dockerfile_1
+      dockerfile: Dockerfile
+      target: main
+      args: 
+        ROS_DISTRO: ${ROS_DISTRO:-humble}
+    network_mode: "host"
+    runtime: nvidia
+    privileged: true
+    ipc: host
+    volumes:
+      - .:/root/ros2_ws/src/direct_visual_lidar_calibration
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /media/luisasangregorio/D3/rosbags/:/rosbags
+    environment:
+      - "DISPLAY=${DISPLAY}"
+      - QT_X11_NO_MITSHM=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    tty: true
+    command: >
+      bash -c "
+        # Fix permissions for the workspace
+        chmod -R 755 /root/ros2_ws/install/ 2>/dev/null || true
+        # Start a virtual framebuffer. Drop -extension MIT-SHM so Xvfb can manage shared memory internally.
+        Xvfb :99 -screen 0 1024x768x24 -nolisten tcp -noreset > /dev/null 2>&1 &
+        sleep 3
+        export DISPLAY=:99
+        source /opt/ros/humble/setup.bash
+        source /root/ros2_ws/install/setup.bash
+        exec /bin/bash"
+  direct_calibration-superglue:
+    container_name: direct-calibration-superglued
+    build:
+      dockerfile: Dockerfile
+      target: superglued
       args: 
         ROS_DISTRO: ${ROS_DISTRO:-humble}
     network_mode: "host"

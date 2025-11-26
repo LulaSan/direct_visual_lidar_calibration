@@ -73,7 +73,7 @@ public:
 
 class InitialGuessManual {
 public:
-  InitialGuessManual(const std::string& data_path) : data_path(data_path), point_size(1.0f),camera_image_rotate_code(-1) {
+  InitialGuessManual(const std::string& data_path) : data_path(data_path), point_size(3.0f), camera_image_rotate_code(-1) {
     std::ifstream ifs(data_path + "/calib.json");
     if (!ifs) {
       std::cerr << vlcal::console::bold_red << "error: failed to open " << data_path << "/calib.json" << vlcal::console::reset << std::endl;
@@ -102,6 +102,7 @@ public:
     std::cout << "camera_fov:" << estimate_camera_fov(proj, {image_size.width, image_size.height}) * 180.0 / M_PI << "[deg]" << std::endl;
 
     vis.reset(new VisualLiDARVisualizer(proj, dataset, true, false));
+    vis->set_point_scale(point_size);
     vis->set_blend_weight(0.1f);
 
     picking.reset(new PickingPoseEstimation(proj));
@@ -256,15 +257,16 @@ public:
         viewer->append_text(sst.str());
       }
       // LS
-      ImGui::Separator();
+      // ImGui::Separator();
 
-      if (ImGui::Begin("Point Cloud Controls")) {
-        // Point size slider
-        if (ImGui::SliderFloat("Point Scale", &point_size, 0.1f, 10.0f, "%.1f")) {
-          update_point_size();
-        }
-        // LS
-      }
+      // if (ImGui::Begin("Point Cloud Controls")) {
+      //   // Point size slider
+      //   if (ImGui::SliderFloat("Point Scale", &point_size, 0.1f, 10.0f, "%.1f")) {
+      //     update_point_scale();
+      //   }
+      // }
+      //   // LS
+
       ImGui::End();
     });
 
@@ -272,28 +274,25 @@ public:
       cv::waitKey(1);
     }
   }
-  void update_point_size() {
-    if (vis) {
-      vis->set_point_scale(point_size);  // add this method if not already in VisualLiDARVisualizer
-    }
+  void update_point_scale() {
+    vis->set_point_scale(point_size);
   }
-
   void update_image() {
-    const double scale = vis->get_image_display_scale();
-    cv::Mat resized;
+      const double scale = vis->get_image_display_scale();
+      cv::Mat resized;
 
-    cv::resize(dataset[vis->get_selected_bag_id()]->image, resized, cv::Size(), scale, scale);
-    // original code start
-    // cv::Mat resized, canvas;
-    // cv::cvtColor(resized, canvas, cv::COLOR_GRAY2BGR);
-    // original code end
-    // Ls modification
-    // end modification
-    if (camera_image_rotate_code >= 0) {
-      cv::rotate(resized.clone(), resized, camera_image_rotate_code);
-    }
+      cv::resize(dataset[vis->get_selected_bag_id()]->image, resized, cv::Size(), scale, scale);
+      // original code start
+      // cv::Mat resized, canvas;
+      // cv::cvtColor(resized, canvas, cv::COLOR_GRAY2BGR);
+      // original code end
+      // Ls modification
+      // end modification
+      if (camera_image_rotate_code >= 0) {
+        cv::rotate(resized.clone(), resized, camera_image_rotate_code);
+      }
 
-    cv::imshow("image", resized);
+      cv::imshow("image", resized);
   }
 
   Eigen::Vector2d transform_camera_point(const Eigen::Vector2d& pt) {

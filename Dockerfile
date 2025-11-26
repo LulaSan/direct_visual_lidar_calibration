@@ -1,4 +1,4 @@
-FROM koide3/gtsam_docker:humble
+FROM koide3/gtsam_docker:humble AS main
 
 RUN apt-fast update \
   && apt-fast install -y --no-install-recommends \
@@ -45,6 +45,22 @@ RUN echo "#!/bin/bash" >> /ros_entrypoint.sh \
   && chmod a+x /ros_entrypoint.sh
 
 WORKDIR /root/ros2_ws/src/direct_visual_lidar_calibration
+
+ENTRYPOINT ["/ros_entrypoint.sh"]
+CMD ["bash"]
+
+
+FROM main AS superglued 
+
+RUN apt-fast update \
+  && apt-fast install -y --no-install-recommends \
+  python3-pip python3-numpy python3-torch python3-torchvision python3-matplotlib python3-opencv \
+  && apt-fast clean \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN git clone https://github.com/magicleap/SuperGluePretrainedNetwork /root/SuperGlue
+ENV PYTHONPATH=$PYTHONPATH:/root/SuperGlue
+
 
 ENTRYPOINT ["/ros_entrypoint.sh"]
 CMD ["bash"]

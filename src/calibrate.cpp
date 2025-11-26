@@ -91,7 +91,7 @@ public:
       ImGui::End();
     });
 
-    VisualLiDARVisualizer vis(proj, dataset, false);
+    VisualLiDARVisualizer vis(proj, dataset, true);//false
     vis.set_T_camera_lidar(init_T_camera_lidar);
 
     VisualCameraCalibrationParams params;
